@@ -1,0 +1,354 @@
+---
+title: "An Analysis on Climate Change Misinformation Claims"
+author: "Victoria DelaCruz"
+date: "2023-06-28"
+output: 
+  html_document:
+    code_download: TRUE
+---
+
+Loading in Packages
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(jsonlite) # allows us to read in json files
+library(tidyverse) # allows us to do lots of data manipulation and basic data science
+library(here) # allows us to cut out long file paths (ex. "users/connor/dowloads/etc")
+library(forcats) # 
+library(tidytext) # allows us to tokenize data 
+library(dplyr) # allows us to manipulate dataframes
+library(stringr) # allows us to count the number of words in a cell
+library(quanteda) # allows us to tokenize data
+library(quanteda.textplots) # allows us to make network plots
+library(gridExtra) # allows us to combine multiple plots into 1
+library(wordcloud) # allows us to generate word clouds
+library(qdapDictionaries)
+```
+
+Reading in dataset
+```{r}
+nature_data <- read_csv(here("data/training.csv"))
+```
+Creating Word-Count column
+- word-count for each claim in the dataset
+```{r}
+nature_data <- nature_data %>% 
+  mutate(word_count = str_count(nature_data$text, "\\S+"))
+```
+
+## Exploring the data
+```{r}
+colnames(nature_data)
+unique(nature_data$claim)
+table(nature_data$claim)
+```
+Removing all claims with the claim label "0_0"
+```{r}
+nature_data_clean <- nature_data %>% filter(!claim == "0_0")
+```
+
+Creating a Horizontal Bar Plot displaying all claim labels and count
+```{r}
+ggplot(data = nature_data_clean, aes(x = fct_rev(fct_infreq(claim))))+
+  geom_bar(fill = "steelblue", color = "black") +
+  theme_minimal() +
+  coord_flip() +
+  labs(y = "Number of Claims", x = "Type of Claim", title = "Number of Claims by Type")
+```
+Organizing the dataset by Super Claim number rather than specific claim labels
+```{r}
+nature_data_clean <- nature_data_clean %>% 
+  group_by(claim_number = substr(nature_data_clean$claim,1,1)) %>% 
+  select(-c("claim"))
+```
+
+Creating a Horizontal Bar Plot displaying all super-claims and count
+```{r}
+ggplot(data = nature_data_clean, aes(x = fct_rev(fct_infreq(claim_number))))+
+  geom_bar(fill = "steelblue", color = "black") +
+  theme_minimal() +
+  coord_flip() +
+  labs(y = "Number of Claims", x = "Type of Claim", title = "Number of Claims by Type")
+```
+Looking at word count distribution by super claim
+```{r}
+ggplot(nature_data_clean, aes(x = word_count, fill = claim_number)) +
+  geom_histogram(bins = 67, color = "black") +
+  theme_minimal()
+```
+
+## Analyzing Lexicon Patterns 
+
+Tokenize data
+```{r}
+nature_data_clean_tokenized <- nature_data_clean[,-2]%>% 
+  unnest_tokens(word, text)
+```
+
+Counting tokens
+```{r}
+nature_data_clean_tokenized <- nature_data_clean_tokenized %>% 
+  count(word) %>% 
+  arrange(desc(n))
+```
+
+Filtering tokens for stopwords
+```{r}
+nature_data_clean_tokenized <- nature_data_clean_tokenized %>% 
+  filter(!word %in% stopwords("english"))
+```
+
+Creating a Wordcloud
+```{r}
+wordcloud(words = nature_data_clean_tokenized$word, freq = nature_data_clean_tokenized$n, min.freq = 5, max.words=200, random.order=FALSE, rot.per=0.35,            colors=brewer.pal(8, "RdYlBu"))
+```
+
+Creating a Network Plot
+```{r}
+nature_data_clean_corpus <- corpus(nature_data_clean$text)
+
+toks <- nature_data_clean_corpus %>%
+    tokens(remove_punct = TRUE) %>%
+    tokens_tolower() %>%
+    tokens_remove(pattern = stopwords("english"), padding = FALSE)
+
+
+fcmat <- fcm(toks, context = "window", tri = FALSE)
+
+feat <- names(topfeatures(fcmat, 30))
+
+fcm_select(fcmat, pattern = feat) %>%
+    textplot_network(min_freq = 0.5, edge_color = "#E7C100")
+```
+
+Looking at Bigrams 
+```{r}
+nature_data_clean_claims <- nature_data_clean %>% 
+  select(text)
+nature_data_clean_claims 
+
+ngrams <- nature_data_clean_claims %>% 
+  unnest_tokens(bigram, text, token = "ngrams", n = 2)
+
+ngrams <- ngrams %>% 
+ separate(bigram, c("word1", "word2"), sep = " ") 
+
+ngrams <- ngrams %>%
+  filter(!word1 %in% stop_words$word) %>%
+      filter(!word2 %in% stop_words$word)
+
+ngrams <- ngrams %>%
+  unite(bigram, word1, word2, sep=" ")
+
+ngrams_counts <- ngrams %>% 
+  count(bigram, sort = TRUE)
+
+head(ngrams_counts)
+```
+Looking at Fourgrams
+```{r}
+ngrams4 <- nature_data_clean_claims %>% 
+  unnest_tokens(fourgram, text, token = "ngrams", n = 4)
+
+ngrams4 <- ngrams4 %>% 
+ separate(fourgram, c("word1", "word2", "word3", "word4"), sep = " ") 
+
+ngrams4 <- ngrams4 %>%
+  filter(!word1 %in% stop_words$word) %>%
+      filter(!word2 %in% stop_words$word) %>% 
+        filter(!word3 %in% stop_words$word) %>% 
+          filter(!word4 %in% stop_words$word)
+
+ngrams4 <- ngrams4 %>%
+  unite(fourgram, word1, word2, word3, word4, sep=" ")
+
+ngrams4_count <- ngrams4 %>% 
+  count(fourgram, sort = TRUE)
+
+head(ngrams4_count)
+```
+
+## Comparing Lexicon Patterns by Super Claim 
+Creating Network Plots for each Super Claim
+
+SUPER CLAIM 1 = Global warming is not happening
+```{r}
+nature_claim_1 <- nature_data_clean %>% 
+  filter(claim_number == "1")
+
+nature_claim_1_corpus <- corpus(nature_claim_1)
+
+toks_claim_1 <- nature_claim_1_corpus %>% 
+  tokens(remove_punct = T) %>% 
+  tokens_tolower() %>% 
+  tokens_remove(pattern = stopwords("english"), padding = F)
+
+fcmat_claim_1 <- fcm(toks_claim_1, context = "window", tri = F)
+feat_claim_1 <- names(topfeatures(fcmat_claim_1, 30))
+
+network_claim_1 <- fcm_select(fcmat_claim_1, pattern = feat_claim_1) %>% 
+  textplot_network(min_freq = 0.5)
+
+network_claim_1
+```
+
+SUPER CLAIM 2 = Human greenhouse gases are not causing global warming
+```{r}
+nature_claim_2 <- nature_data_clean %>% 
+  filter(claim_number == "2")
+
+nature_claim_2_corpus <- corpus(nature_claim_2)
+
+toks_claim_2 <- nature_claim_2_corpus %>% 
+  tokens(remove_punct = T) %>% 
+  tokens_tolower() %>% 
+  tokens_remove(pattern = stopwords("english"), padding = F)
+
+fcmat_claim_2 <- fcm(toks_claim_2, context = "window", tri = F)
+feat_claim_2 <- names(topfeatures(fcmat_claim_2, 30))
+
+network_claim_2 <- fcm_select(fcmat_claim_2, pattern = feat_claim_2) %>% 
+  textplot_network(min_freq = 0.5)
+
+network_claim_2
+```
+
+SUPER CLAIM 3 = Climate impacts are not bad
+```{r}
+nature_claim_3 <- nature_data_clean %>% 
+  filter(claim_number == "3")
+
+nature_claim_3_corpus <- corpus(nature_claim_3)
+
+toks_claim_3 <- nature_claim_3_corpus %>% 
+  tokens(remove_punct = T) %>% 
+  tokens_tolower() %>% 
+  tokens_remove(pattern = stopwords("english"), padding = F)
+
+fcmat_claim_3 <- fcm(toks_claim_3, context = "window", tri = F)
+feat_claim_3 <- names(topfeatures(fcmat_claim_3, 30))
+
+network_claim_3 <- fcm_select(fcmat_claim_3, pattern = feat_claim_3) %>% 
+  textplot_network(min_freq = 0.5)
+network_claim_3
+```
+
+SUPER CLAIM 4 = Climate solutions won't work
+```{r}
+nature_claim_4 <- nature_data_clean %>% 
+  filter(claim_number == "4")
+
+nature_claim_4_corpus <- corpus(nature_claim_4)
+
+toks_claim_4 <- nature_claim_4_corpus %>% 
+  tokens(remove_punct = T) %>% 
+  tokens_tolower() %>% 
+  tokens_remove(pattern = stopwords("english"), padding = F)
+
+fcmat_claim_4 <- fcm(toks_claim_4, context = "window", tri = F)
+feat_claim_4 <- names(topfeatures(fcmat_claim_4, 30))
+
+network_claim_4 <- fcm_select(fcmat_claim_4, pattern = feat_claim_4) %>% 
+  textplot_network(min_freq = 0.5, edge_color = "#E7C100")
+network_claim_4
+```
+SUPER CLAIM 5 = Climate movement/science is unreliable
+```{r}
+nature_claim_5 <- nature_data_clean %>% 
+  filter(claim_number == "5")
+
+nature_claim_5_corpus <- corpus(nature_claim_5)
+
+toks_claim_5 <- nature_claim_5_corpus %>% 
+  tokens(remove_punct = T) %>% 
+  tokens_tolower() %>% 
+  tokens_remove(pattern = stopwords("english"), padding = F)
+
+fcmat_claim_5 <- fcm(toks_claim_5, context = "window", tri = F)
+feat_claim_5 <- names(topfeatures(fcmat_claim_5, 30))
+
+network_claim_5 <- fcm_select(fcmat_claim_5, pattern = feat_claim_5) %>% 
+  textplot_network(min_freq = 0.5)
+
+network_claim_5
+
+```
+
+GRID ARRANGE
+- Putting together all network plots for comparison
+```{r}
+grid.arrange(network_claim_1, network_claim_2, network_claim_3, network_claim_4, network_claim_5)
+```
+
+Creating a Wordcloud for Super Claim 4
+```{r}
+final_wordcloud <- nature_data_clean %>% filter(claim_number == "4") %>% 
+  unnest_tokens(word, text) 
+
+final_wordcloud_tokenized <- final_wordcloud %>% 
+  count(word) %>% 
+  arrange(desc(n))
+
+final_wordcloud_tokenized <- final_wordcloud_tokenized %>% 
+  filter(!word %in% stopwords("english"))
+
+wordcloud(words = final_wordcloud_tokenized$word, freq = final_wordcloud_tokenized$n, 
+          min.freq = 5, max.words=200, random.order=FALSE, rot.per=0.35,
+          colors=brewer.pal(8, "RdYlBu"))
+```
+
+
+## Sentiment Analysis
+Reading in dataset
+- This dataset is a result from running EmoRoBERTa in Google Colab with the nature_data dataset
+```{r}
+emoroberta <- read_csv(here("data/climate_change.csv"))
+```
+
+Exploring the dataset
+```{r}
+table(emoroberta$emotion)
+unique(emoroberta$emotion)
+```
+
+```{r}
+dim(emoroberta)
+str(emoroberta)
+colnames(emoroberta)
+```
+Cleaning up dataset
+- Filtering out claims with the "neutral" sentiment, displaying what super-claim belongs to each text
+```{r}
+rownames(emoroberta) <-  NULL
+emoroberta <- emoroberta[,-1]
+emoroberta_clean_1 <- emoroberta %>% 
+  group_by(claim_number = substr(emoroberta$claim,1,1)) %>% select(-c("claim")) %>% filter(!emotion == "neutral")
+```
+
+Turning the dataset into a dataframe
+```{r}
+emotions <- table(emoroberta_clean_1$emotion)
+emotions_data <- data.frame(Emotions = names(emotions), Frequency = as.numeric(emotions))
+```
+
+Creating a horizontal bar plot with sentiment scores
+```{r}
+ggplot(emotions_data, aes(x = Frequency, y = reorder(Emotions, Frequency), fill = Emotions)) +
+  geom_bar(stat = "identity") +
+  theme(legend.position = "none") +
+  labs(title = "Sentiment Analysis", x = "Frequency", y = "Emotions")
+```
+
+Creating a dataframe with emotion, claim numbers, and frequency
+```{r}
+emotions_data_2 <- table(emoroberta_clean_1$claim_number, emoroberta_clean_1$emotion)
+emotions_count <- as.data.frame(emotions_data_2)
+names(emotions_count) <- c("Claim_Number", "Emotion", "Frequency")
+```
+
+Creating a bar chart displaying emotions for each super claim and frequency
+```{r}
+ggplot(data = emotions_count, aes(x= Frequency, y = Claim_Number)) +
+  geom_histogram(aes(fill = Emotion), stat = "identity") +
+  coord_flip() +
+  labs(x = "Count", y = "Super Claim", title = "Sentiment Analysis")
+```
